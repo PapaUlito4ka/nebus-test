@@ -10,7 +10,7 @@ import aio_pika
 import httpx
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.broker import declare_topology
+from app.broker import DLQ_NAME, RETRY_QUEUE_NAMES, declare_topology
 from app.config import settings
 from app.db import async_session
 from app.gateway import emulate_gateway
@@ -20,6 +20,8 @@ from app.models import Payment, PaymentStatus
 logger = logging.getLogger(__name__)
 
 Gateway = Callable[[], Awaitable[PaymentStatus]]
+
+TERMINAL_STATUSES = {PaymentStatus.SUCCEEDED, PaymentStatus.FAILED}
 
 
 async def handle_payment(
@@ -33,30 +35,62 @@ async def handle_payment(
         logger.warning("payment_not_found", extra={"payment_id": str(payment_id)})
         return
 
-    payment.status = await gateway()
-    payment.processed_at = datetime.now(UTC)
-    await session.commit()
-    logger.info(
-        "gateway_emulation_done",
-        extra={"payment_id": str(payment_id), "status": payment.status.value},
-    )
+    if payment.status in TERMINAL_STATUSES:
+        logger.info(
+            "gateway_emulation_skipped",
+            extra={"payment_id": str(payment_id), "status": payment.status.value},
+        )
+    else:
+        payment.status = await gateway()
+        payment.processed_at = datetime.now(UTC)
+        await session.commit()
+        logger.info(
+            "gateway_emulation_done",
+            extra={"payment_id": str(payment_id), "status": payment.status.value},
+        )
 
     webhook_payload = {
         "payment_id": str(payment.id),
         "status": payment.status.value,
         "amount": str(payment.amount),
         "currency": payment.currency.value,
-        "processed_at": payment.processed_at.isoformat(),
+        "processed_at": payment.processed_at.isoformat() if payment.processed_at else None,
     }
     response = await http_client.post(payment.webhook_url, json=webhook_payload, timeout=5.0)
+    response.raise_for_status()
     logger.info(
         "webhook_sent",
         extra={"payment_id": str(payment_id), "status_code": response.status_code},
     )
 
 
+def _next_retry_routing_key(message: aio_pika.abc.AbstractIncomingMessage) -> str:
+    x_death = message.headers.get("x-death")
+    attempt = len(x_death) if isinstance(x_death, list) else 0
+    if attempt < len(RETRY_QUEUE_NAMES):
+        return RETRY_QUEUE_NAMES[attempt]
+    return DLQ_NAME
+
+
+async def _route_to_retry(
+    exchange: aio_pika.abc.AbstractExchange, message: aio_pika.abc.AbstractIncomingMessage
+) -> None:
+    routing_key = _next_retry_routing_key(message)
+    retry_message = aio_pika.Message(
+        body=message.body,
+        content_type=message.content_type,
+        delivery_mode=aio_pika.DeliveryMode.PERSISTENT,
+        headers=dict(message.headers),
+    )
+    await exchange.publish(retry_message, routing_key=routing_key)
+    logger.warning("payment_processing_routed_to_retry", extra={"routing_key": routing_key})
+
+
 async def _on_message(
-    message: aio_pika.abc.AbstractIncomingMessage, *, http_client: httpx.AsyncClient
+    message: aio_pika.abc.AbstractIncomingMessage,
+    *,
+    http_client: httpx.AsyncClient,
+    exchange: aio_pika.abc.AbstractExchange,
 ) -> None:
     async with message.process():
         payload = json.loads(message.body)
@@ -66,7 +100,7 @@ async def _on_message(
                 await handle_payment(session, emulate_gateway, http_client, payment_id)
         except Exception:
             logger.exception("payment_processing_failed", extra={"payment_id": str(payment_id)})
-            raise
+            await _route_to_retry(exchange, message)
 
 
 async def main() -> None:
@@ -75,9 +109,9 @@ async def main() -> None:
     async with connection:
         channel = await connection.channel()
         await channel.set_qos(prefetch_count=10)
-        _, queue = await declare_topology(channel)
+        exchange, queue = await declare_topology(channel)
         async with httpx.AsyncClient() as http_client:
-            await queue.consume(functools.partial(_on_message, http_client=http_client))
+            await queue.consume(functools.partial(_on_message, http_client=http_client, exchange=exchange))
             await asyncio.Event().wait()
 
 
