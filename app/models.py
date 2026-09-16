@@ -29,11 +29,20 @@ class Payment(Base):
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     amount: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False)
-    currency: Mapped[Currency] = mapped_column(Enum(Currency, name="currency"), nullable=False)
+    currency: Mapped[Currency] = mapped_column(
+        Enum(Currency, name="currency", values_callable=lambda enum_cls: [member.value for member in enum_cls]),
+        nullable=False,
+    )
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     metadata_: Mapped[dict] = mapped_column("metadata", JSONB, nullable=False, default=dict)
     status: Mapped[PaymentStatus] = mapped_column(
-        Enum(PaymentStatus, name="payment_status"), nullable=False, default=PaymentStatus.PENDING
+        Enum(
+            PaymentStatus,
+            name="payment_status",
+            values_callable=lambda enum_cls: [member.value for member in enum_cls],
+        ),
+        nullable=False,
+        default=PaymentStatus.PENDING,
     )
     idempotency_key: Mapped[str] = mapped_column(String, nullable=False, unique=True)
     webhook_url: Mapped[str] = mapped_column(String, nullable=False)
