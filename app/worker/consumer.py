@@ -10,13 +10,13 @@ import aio_pika
 import httpx
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.broker import declare_topology
-from app.config import settings
-from app.db import async_session
-from app.gateway import emulate_gateway
-from app.logging_config import configure_logging
+from app.core.config import settings
+from app.core.db import async_session
+from app.core.logging_config import configure_logging
+from app.messaging.broker import declare_topology
+from app.messaging.retry_chain import next_hop
 from app.models import Payment, PaymentStatus
-from app.retry_chain import next_hop
+from app.worker.gateway import emulate_gateway
 
 logger = logging.getLogger(__name__)
 

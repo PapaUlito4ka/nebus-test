@@ -2,7 +2,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import OutboxEntry
-from app.outbox import relay_once
+from app.services.outbox import relay_once
 
 
 async def test_relay_once_publishes_unpublished_row_and_marks_it_published(

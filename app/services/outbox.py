@@ -5,7 +5,7 @@ from datetime import UTC, datetime
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from app.broker import Publish
+from app.messaging.broker import Publish
 from app.models import OutboxEntry
 
 logger = logging.getLogger(__name__)

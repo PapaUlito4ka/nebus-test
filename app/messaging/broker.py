@@ -5,7 +5,7 @@ from typing import Any
 import aio_pika
 from aio_pika.abc import AbstractChannel, AbstractExchange, AbstractQueue
 
-from app.retry_chain import DLQ_NAME, RETRY_QUEUE_NAMES
+from app.messaging.retry_chain import DLQ_NAME, RETRY_QUEUE_NAMES
 
 EXCHANGE_NAME = "payments"
 QUEUE_NAME = "payments.new"

@@ -58,7 +58,7 @@ services:
         condition: service_healthy
       api:
         condition: service_healthy
-    command: python -m app.consumer
+    command: python -m app.worker.consumer
 
 volumes:
   postgres_data:

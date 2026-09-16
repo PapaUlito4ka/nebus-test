@@ -6,7 +6,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
 from app.models import Currency, OutboxEntry, Payment, PaymentStatus
-from app.payments import IdempotencyKeyConflict, create_payment
+from app.services.payments import IdempotencyKeyConflict, create_payment
 
 
 async def test_create_payment_writes_payment_and_outbox_row_in_one_transaction(

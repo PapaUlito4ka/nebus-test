@@ -4,9 +4,9 @@ from decimal import Decimal
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.consumer import RETRY_ATTEMPT_HEADER, _route_to_retry, handle_payment
+from app.messaging.retry_chain import RETRY_QUEUE_NAMES
 from app.models import Currency, Payment, PaymentStatus
-from app.retry_chain import RETRY_QUEUE_NAMES
+from app.worker.consumer import RETRY_ATTEMPT_HEADER, _route_to_retry, handle_payment
 
 TEST_PAYMENT_ID = uuid.uuid4()
 

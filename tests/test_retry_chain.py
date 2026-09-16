@@ -1,4 +1,4 @@
-from app.retry_chain import DLQ_NAME, RETRY_QUEUE_NAMES, RetryHop, next_hop
+from app.messaging.retry_chain import DLQ_NAME, RETRY_QUEUE_NAMES, RetryHop, next_hop
 
 
 def test_first_failure_goes_to_first_retry_queue() -> None:
