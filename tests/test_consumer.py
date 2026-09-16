@@ -34,7 +34,7 @@ class FakeExchange:
         self.published: list[tuple[str, bytes]] = []
         self.published_headers: list[dict] = []
 
-    async def publish(self, message, routing_key: str) -> None:  # noqa: ANN001
+    async def publish(self, message, routing_key: str) -> None:
         self.published.append((routing_key, message.body))
         self.published_headers.append(dict(message.headers))
 

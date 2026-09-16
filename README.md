@@ -107,4 +107,5 @@ curl -s -u guest:guest http://localhost:15672/api/queues/%2F/payments.new.dlq | 
 ```sh
 uv run pytest       # нужен доступный postgres по TEST_DATABASE_URL (по умолчанию localhost:5433)
 uv run mypy app
+uv run ruff check .
 ```

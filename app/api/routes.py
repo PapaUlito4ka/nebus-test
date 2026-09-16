@@ -1,4 +1,5 @@
 import logging
+from typing import Annotated
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Header, HTTPException, status
@@ -13,6 +14,8 @@ from app.services.payments import IdempotencyKeyConflict, create_payment
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+
+SessionDep = Annotated[AsyncSession, Depends(get_session)]
 
 
 def verify_api_key(x_api_key: str | None = Header(default=None)) -> None:
@@ -32,8 +35,8 @@ async def health() -> dict[str, str]:
 )
 async def create_payment_endpoint(
     body: PaymentCreate,
+    session: SessionDep,
     idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
-    session: AsyncSession = Depends(get_session),
 ) -> PaymentCreateResponse:
     if not idempotency_key:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Idempotency-Key header is required")
@@ -59,7 +62,7 @@ async def create_payment_endpoint(
 
 
 @router.get("/api/v1/payments/{payment_id}", dependencies=[Depends(verify_api_key)])
-async def get_payment(payment_id: UUID, session: AsyncSession = Depends(get_session)) -> PaymentRead:
+async def get_payment(payment_id: UUID, session: SessionDep) -> PaymentRead:
     payment = await session.get(Payment, payment_id)
     if payment is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="payment not found")
