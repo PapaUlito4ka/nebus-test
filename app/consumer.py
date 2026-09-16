@@ -10,12 +10,13 @@ import aio_pika
 import httpx
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.broker import DLQ_NAME, RETRY_QUEUE_NAMES, declare_topology
+from app.broker import declare_topology
 from app.config import settings
 from app.db import async_session
 from app.gateway import emulate_gateway
 from app.logging_config import configure_logging
 from app.models import Payment, PaymentStatus
+from app.retry_chain import next_hop
 
 logger = logging.getLogger(__name__)
 
@@ -67,16 +68,9 @@ async def handle_payment(
 RETRY_ATTEMPT_HEADER = "x-retry-attempt"
 
 
-def _retry_attempt(message: aio_pika.abc.AbstractIncomingMessage) -> int:
-    attempt = message.headers.get(RETRY_ATTEMPT_HEADER, 0)
+def _attempt_from_headers(headers: dict) -> int:
+    attempt = headers.get(RETRY_ATTEMPT_HEADER, 0)
     return attempt if isinstance(attempt, int) else 0
-
-
-def _next_retry_routing_key(message: aio_pika.abc.AbstractIncomingMessage) -> str:
-    attempt = _retry_attempt(message)
-    if attempt < len(RETRY_QUEUE_NAMES):
-        return RETRY_QUEUE_NAMES[attempt]
-    return DLQ_NAME
 
 
 async def _route_to_retry(
@@ -84,19 +78,19 @@ async def _route_to_retry(
     message: aio_pika.abc.AbstractIncomingMessage,
     payment_id: uuid.UUID,
 ) -> None:
-    routing_key = _next_retry_routing_key(message)
+    hop = next_hop(_attempt_from_headers(message.headers))
     headers = dict(message.headers)
-    headers[RETRY_ATTEMPT_HEADER] = _retry_attempt(message) + 1
+    headers[RETRY_ATTEMPT_HEADER] = hop.next_attempt
     retry_message = aio_pika.Message(
         body=message.body,
         content_type=message.content_type,
         delivery_mode=aio_pika.DeliveryMode.PERSISTENT,
         headers=headers,
     )
-    await exchange.publish(retry_message, routing_key=routing_key)
+    await exchange.publish(retry_message, routing_key=hop.routing_key)
     logger.warning(
         "payment_processing_routed_to_retry",
-        extra={"payment_id": str(payment_id), "routing_key": routing_key},
+        extra={"payment_id": str(payment_id), "routing_key": hop.routing_key},
     )
 
 

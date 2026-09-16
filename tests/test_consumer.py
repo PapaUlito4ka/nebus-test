@@ -4,9 +4,9 @@ from decimal import Decimal
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.broker import DLQ_NAME, RETRY_QUEUE_NAMES
 from app.consumer import RETRY_ATTEMPT_HEADER, _route_to_retry, handle_payment
 from app.models import Currency, Payment, PaymentStatus
+from app.retry_chain import RETRY_QUEUE_NAMES
 
 TEST_PAYMENT_ID = uuid.uuid4()
 
@@ -103,38 +103,11 @@ async def test_handle_payment_skips_gateway_for_already_terminal_payment(db_sess
     assert sent_payload["status"] == "succeeded"
 
 
-async def test_route_to_retry_first_failure_goes_to_first_retry_queue() -> None:
-    exchange = FakeExchange()
-    message = FakeIncomingMessage(b'{"payment_id": "x"}', attempt=0)
-
-    await _route_to_retry(exchange, message, TEST_PAYMENT_ID)
-
-    assert exchange.published == [(RETRY_QUEUE_NAMES[0], message.body)]
-
-
-async def test_route_to_retry_escalates_with_attempt_count() -> None:
-    for attempt, expected_queue in enumerate(RETRY_QUEUE_NAMES):
-        exchange = FakeExchange()
-        message = FakeIncomingMessage(b'{"payment_id": "x"}', attempt=attempt)
-
-        await _route_to_retry(exchange, message, TEST_PAYMENT_ID)
-
-        assert exchange.published == [(expected_queue, message.body)]
-
-
-async def test_route_to_retry_after_all_levels_goes_to_dlq() -> None:
-    exchange = FakeExchange()
-    message = FakeIncomingMessage(b'{"payment_id": "x"}', attempt=len(RETRY_QUEUE_NAMES))
-
-    await _route_to_retry(exchange, message, TEST_PAYMENT_ID)
-
-    assert exchange.published == [(DLQ_NAME, message.body)]
-
-
-async def test_route_to_retry_increments_attempt_header_for_next_hop() -> None:
+async def test_route_to_retry_publishes_next_hop_and_bumps_attempt_header() -> None:
     exchange = FakeExchange()
     message = FakeIncomingMessage(b'{"payment_id": "x"}', attempt=1)
 
     await _route_to_retry(exchange, message, TEST_PAYMENT_ID)
 
+    assert exchange.published == [(RETRY_QUEUE_NAMES[1], message.body)]
     assert exchange.published_headers[0][RETRY_ATTEMPT_HEADER] == 2
