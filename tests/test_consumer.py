@@ -4,7 +4,7 @@ from decimal import Decimal
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.broker import DLQ_NAME, RETRY_QUEUE_NAMES
-from app.consumer import _route_to_retry, handle_payment
+from app.consumer import RETRY_ATTEMPT_HEADER, _route_to_retry, handle_payment
 from app.models import Currency, Payment, PaymentStatus
 
 
@@ -37,10 +37,10 @@ class FakeExchange:
 
 
 class FakeIncomingMessage:
-    def __init__(self, body: bytes, x_death_count: int = 0) -> None:
+    def __init__(self, body: bytes, attempt: int = 0) -> None:
         self.body = body
         self.content_type = "application/json"
-        self.headers = {"x-death": [{"count": 1}] * x_death_count} if x_death_count else {}
+        self.headers = {RETRY_ATTEMPT_HEADER: attempt} if attempt else {}
 
 
 async def test_handle_payment_runs_gateway_and_sends_webhook(db_session: AsyncSession) -> None:
@@ -102,7 +102,7 @@ async def test_handle_payment_skips_gateway_for_already_terminal_payment(db_sess
 
 async def test_route_to_retry_first_failure_goes_to_first_retry_queue() -> None:
     exchange = FakeExchange()
-    message = FakeIncomingMessage(b'{"payment_id": "x"}', x_death_count=0)
+    message = FakeIncomingMessage(b'{"payment_id": "x"}', attempt=0)
 
     await _route_to_retry(exchange, message)
 
@@ -112,7 +112,7 @@ async def test_route_to_retry_first_failure_goes_to_first_retry_queue() -> None:
 async def test_route_to_retry_escalates_with_attempt_count() -> None:
     for attempt, expected_queue in enumerate(RETRY_QUEUE_NAMES):
         exchange = FakeExchange()
-        message = FakeIncomingMessage(b'{"payment_id": "x"}', x_death_count=attempt)
+        message = FakeIncomingMessage(b'{"payment_id": "x"}', attempt=attempt)
 
         await _route_to_retry(exchange, message)
 
@@ -121,17 +121,17 @@ async def test_route_to_retry_escalates_with_attempt_count() -> None:
 
 async def test_route_to_retry_after_all_levels_goes_to_dlq() -> None:
     exchange = FakeExchange()
-    message = FakeIncomingMessage(b'{"payment_id": "x"}', x_death_count=len(RETRY_QUEUE_NAMES))
+    message = FakeIncomingMessage(b'{"payment_id": "x"}', attempt=len(RETRY_QUEUE_NAMES))
 
     await _route_to_retry(exchange, message)
 
     assert exchange.published == [(DLQ_NAME, message.body)]
 
 
-async def test_route_to_retry_preserves_x_death_header_for_next_hop() -> None:
+async def test_route_to_retry_increments_attempt_header_for_next_hop() -> None:
     exchange = FakeExchange()
-    message = FakeIncomingMessage(b'{"payment_id": "x"}', x_death_count=1)
+    message = FakeIncomingMessage(b'{"payment_id": "x"}', attempt=1)
 
     await _route_to_retry(exchange, message)
 
-    assert exchange.published_headers[0]["x-death"] == message.headers["x-death"]
+    assert exchange.published_headers[0][RETRY_ATTEMPT_HEADER] == 2

@@ -64,9 +64,16 @@ async def handle_payment(
     )
 
 
+RETRY_ATTEMPT_HEADER = "x-retry-attempt"
+
+
+def _retry_attempt(message: aio_pika.abc.AbstractIncomingMessage) -> int:
+    attempt = message.headers.get(RETRY_ATTEMPT_HEADER, 0)
+    return attempt if isinstance(attempt, int) else 0
+
+
 def _next_retry_routing_key(message: aio_pika.abc.AbstractIncomingMessage) -> str:
-    x_death = message.headers.get("x-death")
-    attempt = len(x_death) if isinstance(x_death, list) else 0
+    attempt = _retry_attempt(message)
     if attempt < len(RETRY_QUEUE_NAMES):
         return RETRY_QUEUE_NAMES[attempt]
     return DLQ_NAME
@@ -76,11 +83,13 @@ async def _route_to_retry(
     exchange: aio_pika.abc.AbstractExchange, message: aio_pika.abc.AbstractIncomingMessage
 ) -> None:
     routing_key = _next_retry_routing_key(message)
+    headers = dict(message.headers)
+    headers[RETRY_ATTEMPT_HEADER] = _retry_attempt(message) + 1
     retry_message = aio_pika.Message(
         body=message.body,
         content_type=message.content_type,
         delivery_mode=aio_pika.DeliveryMode.PERSISTENT,
-        headers=dict(message.headers),
+        headers=headers,
     )
     await exchange.publish(retry_message, routing_key=routing_key)
     logger.warning("payment_processing_routed_to_retry", extra={"routing_key": routing_key})
