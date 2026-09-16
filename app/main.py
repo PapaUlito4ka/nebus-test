@@ -14,7 +14,7 @@ from app.db import async_session, get_session
 from app.logging_config import configure_logging
 from app.models import Payment
 from app.outbox import run_relay_loop
-from app.payments import create_payment
+from app.payments import IdempotencyKeyConflict, create_payment
 from app.schemas import PaymentCreate, PaymentCreateResponse, PaymentRead
 
 configure_logging()
@@ -57,18 +57,28 @@ async def health() -> dict[str, str]:
 )
 async def create_payment_endpoint(
     body: PaymentCreate,
-    idempotency_key: str = Header(..., alias="Idempotency-Key"),
+    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
     session: AsyncSession = Depends(get_session),
 ) -> PaymentCreateResponse:
-    payment = await create_payment(
-        session,
-        idempotency_key=idempotency_key,
-        amount=body.amount,
-        currency=body.currency,
-        description=body.description,
-        metadata=body.metadata,
-        webhook_url=str(body.webhook_url),
-    )
+    if not idempotency_key:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Idempotency-Key header is required")
+
+    try:
+        payment = await create_payment(
+            session,
+            idempotency_key=idempotency_key,
+            amount=body.amount,
+            currency=body.currency,
+            description=body.description,
+            metadata=body.metadata,
+            webhook_url=str(body.webhook_url),
+        )
+    except IdempotencyKeyConflict as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Idempotency-Key already used with a different request body",
+        ) from exc
+
     logger.info("payment_created", extra={"payment_id": str(payment.id)})
     return PaymentCreateResponse(payment_id=payment.id, status=payment.status, created_at=payment.created_at)
 
