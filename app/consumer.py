@@ -80,7 +80,9 @@ def _next_retry_routing_key(message: aio_pika.abc.AbstractIncomingMessage) -> st
 
 
 async def _route_to_retry(
-    exchange: aio_pika.abc.AbstractExchange, message: aio_pika.abc.AbstractIncomingMessage
+    exchange: aio_pika.abc.AbstractExchange,
+    message: aio_pika.abc.AbstractIncomingMessage,
+    payment_id: uuid.UUID,
 ) -> None:
     routing_key = _next_retry_routing_key(message)
     headers = dict(message.headers)
@@ -92,7 +94,10 @@ async def _route_to_retry(
         headers=headers,
     )
     await exchange.publish(retry_message, routing_key=routing_key)
-    logger.warning("payment_processing_routed_to_retry", extra={"routing_key": routing_key})
+    logger.warning(
+        "payment_processing_routed_to_retry",
+        extra={"payment_id": str(payment_id), "routing_key": routing_key},
+    )
 
 
 async def _on_message(
@@ -109,7 +114,7 @@ async def _on_message(
                 await handle_payment(session, emulate_gateway, http_client, payment_id)
         except Exception:
             logger.exception("payment_processing_failed", extra={"payment_id": str(payment_id)})
-            await _route_to_retry(exchange, message)
+            await _route_to_retry(exchange, message, payment_id)
 
 
 async def main() -> None:

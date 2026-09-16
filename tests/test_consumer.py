@@ -1,3 +1,4 @@
+import uuid
 from datetime import UTC, datetime
 from decimal import Decimal
 
@@ -6,6 +7,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.broker import DLQ_NAME, RETRY_QUEUE_NAMES
 from app.consumer import RETRY_ATTEMPT_HEADER, _route_to_retry, handle_payment
 from app.models import Currency, Payment, PaymentStatus
+
+TEST_PAYMENT_ID = uuid.uuid4()
 
 
 class FakeHttpClient:
@@ -104,7 +107,7 @@ async def test_route_to_retry_first_failure_goes_to_first_retry_queue() -> None:
     exchange = FakeExchange()
     message = FakeIncomingMessage(b'{"payment_id": "x"}', attempt=0)
 
-    await _route_to_retry(exchange, message)
+    await _route_to_retry(exchange, message, TEST_PAYMENT_ID)
 
     assert exchange.published == [(RETRY_QUEUE_NAMES[0], message.body)]
 
@@ -114,7 +117,7 @@ async def test_route_to_retry_escalates_with_attempt_count() -> None:
         exchange = FakeExchange()
         message = FakeIncomingMessage(b'{"payment_id": "x"}', attempt=attempt)
 
-        await _route_to_retry(exchange, message)
+        await _route_to_retry(exchange, message, TEST_PAYMENT_ID)
 
         assert exchange.published == [(expected_queue, message.body)]
 
@@ -123,7 +126,7 @@ async def test_route_to_retry_after_all_levels_goes_to_dlq() -> None:
     exchange = FakeExchange()
     message = FakeIncomingMessage(b'{"payment_id": "x"}', attempt=len(RETRY_QUEUE_NAMES))
 
-    await _route_to_retry(exchange, message)
+    await _route_to_retry(exchange, message, TEST_PAYMENT_ID)
 
     assert exchange.published == [(DLQ_NAME, message.body)]
 
@@ -132,6 +135,6 @@ async def test_route_to_retry_increments_attempt_header_for_next_hop() -> None:
     exchange = FakeExchange()
     message = FakeIncomingMessage(b'{"payment_id": "x"}', attempt=1)
 
-    await _route_to_retry(exchange, message)
+    await _route_to_retry(exchange, message, TEST_PAYMENT_ID)
 
     assert exchange.published_headers[0][RETRY_ATTEMPT_HEADER] == 2

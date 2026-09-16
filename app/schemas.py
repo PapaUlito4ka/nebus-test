@@ -9,7 +9,7 @@ from app.models import Currency, PaymentStatus
 
 
 class PaymentCreate(BaseModel):
-    amount: Annotated[Decimal, Field(gt=0)]
+    amount: Annotated[Decimal, Field(gt=0, max_digits=14, decimal_places=2)]
     currency: Currency
     description: str | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
